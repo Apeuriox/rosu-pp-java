@@ -1,0 +1,110 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.97.0
+
+jobs:
+  linux-x86_64:
+    name: Linux x86_64 / Java 21
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install fixed Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component cargo,rustfmt
+
+      - name: Rust formatting
+        run: cargo +"$RUST_TOOLCHAIN" fmt --manifest-path native/Cargo.toml --all -- --check
+
+      - name: Rust tests
+        run: cargo +"$RUST_TOOLCHAIN" test --manifest-path native/Cargo.toml --workspace --locked
+
+      - name: Rust release build
+        run: cargo +"$RUST_TOOLCHAIN" build --manifest-path native/Cargo.toml --release --locked -p rosu-pp-ffi
+
+      - name: Verify maximum GLIBC symbol version
+        shell: bash
+        run: |
+          set -euo pipefail
+          lib=native/target/release/librosu_pp_ffi.so
+          max=$(readelf --version-info "$lib" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -n 1)
+          echo "Highest required GLIBC symbol: $max"
+          highest=$(printf '%s\n' GLIBC_2.38 "$max" | sort -V | tail -n 1)
+          test "$highest" = GLIBC_2.38
+
+      - name: Set up Java 21
+        uses: actions/setup-java@7a445ee88d4e23b52c33a0c400e0b6d99d8d139 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Java preview compilation and tests
+        run: |
+          chmod +x mvnw
+          ./mvnw -B --no-transfer-progress package
+
+      - name: Stage Linux artifacts
+        run: |
+          mkdir -p artifacts
+          cp native/target/release/librosu_pp_ffi.so artifacts/
+          cp native/include/rosu_pp_ffi.h artifacts/
+          cp target/rosu-pp-java-0.0.1.jar artifacts/
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rosu-pp-java-linux-x86_64
+          path: artifacts/
+          if-no-files-found: error
+
+  windows-x86_64:
+    name: Windows x86_64 / Java 21
+    runs-on: windows-2022
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install fixed Rust toolchain
+        shell: pwsh
+        run: rustup toolchain install $env:RUST_TOOLCHAIN --profile minimal --component cargo,rustfmt
+
+      - name: Rust release build
+        shell: pwsh
+        run: cargo "+$env:RUST_TOOLCHAIN" build --manifest-path native/Cargo.toml --release --locked -p rosu-pp-ffi
+
+      - name: Set up Java 21
+        uses: actions/setup-java@7a445ee88d4e23b52c33a0c400e0b6d99d8d139 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Java preview compilation and tests
+        shell: pwsh
+        run: .\mvnw.cmd -B --no-transfer-progress package
+
+      - name: Stage Windows artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          Copy-Item native\target\release\rosu_pp_ffi.dll artifacts\
+          Copy-Item native\include\rosu_pp_ffi.h artifacts\
+          Copy-Item target\rosu-pp-java-0.0.1.jar artifacts\
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rosu-pp-java-windows-x86_64
+          path: artifacts/
+          if-no-files-found: error

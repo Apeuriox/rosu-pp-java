@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "crates/backend-api",
+    "crates/backend-202510",
+    "crates/backend-202607",
+    "crates/ffi",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.97"
+
+[workspace.dependencies]
+backend-api = { path = "crates/backend-api", version = "0.1.0" }
+backend-202510 = { path = "crates/backend-202510", version = "0.1.0" }
+backend-202607 = { path = "crates/backend-202607", version = "0.1.0" }
