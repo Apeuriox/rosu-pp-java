@@ -43,7 +43,7 @@ jobs:
           test "$highest" = GLIBC_2.38
 
       - name: Set up Java 21
-        uses: actions/setup-java@7a445ee88d4e23b52c33a0c400e0b6d99d8d139 # v4.7.1
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: temurin
           java-version: '21'
@@ -54,18 +54,16 @@ jobs:
           chmod +x mvnw
           ./mvnw -B --no-transfer-progress package
 
-      - name: Stage Linux artifacts
+      - name: Stage Linux native artifact
         run: |
-          mkdir -p artifacts
-          cp native/target/release/librosu_pp_ffi.so artifacts/
-          cp native/include/rosu_pp_ffi.h artifacts/
-          cp target/rosu-pp-java-0.0.1.jar artifacts/
+          mkdir -p native-output
+          cp native/target/release/librosu_pp_ffi.so native-output/
 
-      - name: Upload Linux artifacts
+      - name: Upload Linux native artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: rosu-pp-java-linux-x86_64
-          path: artifacts/
+          name: rosu-pp-native-linux-x86_64
+          path: native-output/librosu_pp_ffi.so
           if-no-files-found: error
 
   windows-x86_64:
@@ -84,7 +82,7 @@ jobs:
         run: cargo "+$env:RUST_TOOLCHAIN" build --manifest-path native/Cargo.toml --release --locked -p rosu-pp-ffi
 
       - name: Set up Java 21
-        uses: actions/setup-java@7a445ee88d4e23b52c33a0c400e0b6d99d8d139 # v4.7.1
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: temurin
           java-version: '21'
@@ -94,17 +92,83 @@ jobs:
         shell: pwsh
         run: .\mvnw.cmd -B --no-transfer-progress package
 
-      - name: Stage Windows artifacts
+      - name: Stage Windows native artifact
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force artifacts | Out-Null
-          Copy-Item native\target\release\rosu_pp_ffi.dll artifacts\
-          Copy-Item native\include\rosu_pp_ffi.h artifacts\
-          Copy-Item target\rosu-pp-java-0.0.1.jar artifacts\
+          New-Item -ItemType Directory -Force native-output | Out-Null
+          Copy-Item native\target\release\rosu_pp_ffi.dll native-output\
 
-      - name: Upload Windows artifacts
+      - name: Upload Windows native artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: rosu-pp-java-windows-x86_64
-          path: artifacts/
+          name: rosu-pp-native-windows-x86_64
+          path: native-output/rosu_pp_ffi.dll
+          if-no-files-found: error
+
+  universal-jar:
+    name: Universal JAR / Windows and Linux natives
+    needs: [linux-x86_64, windows-x86_64]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Java 21
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Download Linux native artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: rosu-pp-native-linux-x86_64
+          path: native-input/linux
+
+      - name: Download Windows native artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: rosu-pp-native-windows-x86_64
+          path: native-input/windows
+
+      - name: Stage native classpath resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x mvnw
+          ./mvnw -B --no-transfer-progress clean
+          mkdir -p target/native-resources/META-INF/native/linux-x86_64
+          mkdir -p target/native-resources/META-INF/native/windows-x86_64
+          cp native-input/linux/librosu_pp_ffi.so \
+            target/native-resources/META-INF/native/linux-x86_64/
+          cp native-input/windows/rosu_pp_ffi.dll \
+            target/native-resources/META-INF/native/windows-x86_64/
+
+      - name: Build and test universal JAR
+        run: ./mvnw -B --no-transfer-progress package
+
+      - name: Verify universal JAR contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          jar_file=target/rosu-pp-java-0.0.1.jar
+          jar tf "$jar_file" | grep -Fx 'META-INF/native/linux-x86_64/librosu_pp_ffi.so'
+          jar tf "$jar_file" | grep -Fx 'META-INF/native/windows-x86_64/rosu_pp_ffi.dll'
+
+      - name: Stage universal distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p universal-output/native
+          cp target/rosu-pp-java-0.0.1.jar universal-output/
+          cp native/include/rosu_pp_ffi.h universal-output/
+          cp native-input/linux/librosu_pp_ffi.so universal-output/native/
+          cp native-input/windows/rosu_pp_ffi.dll universal-output/native/
+
+      - name: Upload universal distribution
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rosu-pp-java-universal
+          path: universal-output/
           if-no-files-found: error

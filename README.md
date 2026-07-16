@@ -16,6 +16,7 @@ The algorithm version is part of every result and must also be included in appli
 - Java 21
 - Rust 1.97 or newer when building the native bridge locally
 - Windows x86_64 or Linux x86_64
+- Docker Desktop in Linux-container mode when building both native platforms from Windows
 
 Java 21 still exposes FFM as a preview API, so compilation and execution require:
 
@@ -35,13 +36,23 @@ The native library is loaded automatically when `RosuPp` is used for the first t
 3. `native/target/release/<library>`
 4. `target/native/<library>`
 5. `<library>` in the current working directory
+6. The matching native library embedded in the JAR under `META-INF/native/<platform>/`
 
 The platform library name is:
 
 - Windows: `rosu_pp_ffi.dll`
 - Linux: `librosu_pp_ffi.so`
 
-The system property and environment variable must point to the native library file itself, not only to its containing directory. The fallback paths are resolved relative to the Java process working directory. The native library is distributed separately and is not extracted from the JAR.
+The system property and environment variable must point to the native library file itself, not only to its containing directory. The fallback paths are resolved relative to the Java process working directory.
+
+The universal JAR contains both native libraries:
+
+```text
+META-INF/native/windows-x86_64/rosu_pp_ffi.dll
+META-INF/native/linux-x86_64/librosu_pp_ffi.so
+```
+
+When no external library is found, the loader extracts the library for the current platform to a private temporary directory and keeps it loaded for the lifetime of the JVM. Explicit external paths remain useful for development and overriding the bundled library.
 
 For example:
 
@@ -140,7 +151,7 @@ DifficultyRequest request = DifficultyRequest.builder()
     .build();
 ```
 
-The JSON is parsed for the beatmap's effective game mode by the selected backend. Legacy `.mods(Mods)` and `.modsJson(String)` are mutually exclusive. Malformed JSON, unknown settings, and unsupported mod acronyms produce an explicit native error instead of being ignored. The osu! API's numeric `MR.settings.reflection` values (`0`, `1`, or `2`) and the equivalent rosu-mods string values are both accepted.
+The JSON is parsed for the beatmap's effective game mode by the selected backend. Legacy `.mods(Mods)` and `.modsJson(String)` are mutually exclusive. Malformed JSON, unknown settings, and unsupported mod acronyms produce an explicit native error instead of being ignored.
 
 ## Building and testing
 
@@ -155,9 +166,45 @@ cargo build --release -p rosu-pp-ffi
 
 Build and test Java:
 
-```bash
-mvn -B test
-mvn -B package -DskipTests
+```powershell
+.\mvnw.cmd -B test
+.\mvnw.cmd -B package -DskipTests
 ```
 
-The release native library is written to `native/target/release/`. The Java artifact is written to `target/rosu-pp-java-0.0.1.jar`.
+On Linux, use `./mvnw` instead of `mvnw.cmd`. Ensure that `JAVA_HOME` points to JDK 21 because Maven Wrapper gives `JAVA_HOME` precedence over the `java` executable found on `PATH`.
+
+The platform-local release native library is written to `native/target/release/`. A normal Maven build produces the Java classes but only includes native libraries that were staged in `target/native-resources` before the Maven resource phase.
+
+### Building a universal JAR locally on Windows
+
+The included PowerShell script builds the Windows DLL locally, builds the Linux SO inside the fixed `rust:1.97.0-bookworm` Docker image, stages both libraries, runs the Java tests, and verifies the JAR entries:
+
+```powershell
+$env:JAVA_HOME = 'C:\path\to\jdk-21'
+.\scripts\build-universal.ps1
+```
+
+The Docker Linux build uses Debian Bookworm and therefore targets glibc 2.36, which is below the project's GLIBC 2.38 ceiling. If a compatible Linux SO has already been built, Docker can be skipped:
+
+```powershell
+.\scripts\build-universal.ps1 `
+  -LinuxLibrary 'C:\path\to\librosu_pp_ffi.so'
+```
+
+The resulting universal artifact is:
+
+```text
+target/rosu-pp-java-0.0.1.jar
+```
+
+A Linux host cannot normally produce the MSVC Windows DLL with the standard Rust toolchain. Build it on Windows or download the `rosu-pp-native-windows-x86_64` artifact from GitHub Actions, then stage it together with the locally built Linux SO using the same resource paths shown above.
+
+## GitHub Actions artifacts
+
+The workflow builds and tests both native platforms independently and then creates the universal JAR in a dependent aggregation job. Successful workflow runs expose these artifacts in the run's **Artifacts** section:
+
+- `rosu-pp-native-linux-x86_64`
+- `rosu-pp-native-windows-x86_64`
+- `rosu-pp-java-universal`
+
+`rosu-pp-java-universal` contains `rosu-pp-java-0.0.1.jar`, the public C header, and standalone copies of both native libraries. The JAR itself also contains both native libraries and normally requires no `rosu.pp.native.path` override.

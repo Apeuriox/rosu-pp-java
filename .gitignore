@@ -1,4 +1,7 @@
 target/
+/native-input/
+/native-output/
+/universal-output/
 .codex-tmp-classes/
 .tmp-*/
 !.mvn/wrapper/maven-wrapper.jar
