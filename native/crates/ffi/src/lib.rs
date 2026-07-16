@@ -16,11 +16,12 @@ use std::{
 use backend_202510::Backend202510;
 use backend_202607::Backend202607;
 use backend_api::{
-    Algorithm, Backend, BackendError, Beatmap, DifficultyRequest, Mode, PerformanceRequest,
-    ScoreMode, ScoreState, option, score_field,
+    Algorithm, Backend, BackendError, Beatmap, DifficultyRequest, ModInput, Mode,
+    PerformanceRequest, ScoreMode, ScoreState, option, score_field,
 };
 
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
+const MAX_MODS_JSON_LEN: usize = 1024 * 1024;
 
 pub mod status {
     pub const OK: i32 = 0;
@@ -79,6 +80,8 @@ pub struct RosuDifficultyRequest {
     pub hp: f64,
     pub passed_objects: u32,
     pub reserved: u32,
+    pub mods_json: *const u8,
+    pub mods_json_len: usize,
 }
 
 #[repr(C)]
@@ -354,9 +357,43 @@ fn parse_difficulty(raw: &RosuDifficultyRequest) -> Result<DifficultyRequest, Ba
             )));
         }
     };
-    let mods = u32::try_from(raw.mods).map_err(|_| {
-        BackendError::UnsupportedOption("mods bits above bit 31 are reserved".into())
-    })?;
+    let mods = if raw.option_flags & option::MODS_JSON != 0 {
+        if raw.mods != 0 {
+            return Err(BackendError::InvalidRequest(
+                "legacy mods and mods JSON are mutually exclusive".into(),
+            ));
+        }
+        if raw.mods_json.is_null() || raw.mods_json_len == 0 {
+            return Err(BackendError::InvalidRequest(
+                "mods JSON pointer must be non-null and length must be greater than zero".into(),
+            ));
+        }
+        if raw.mods_json_len > MAX_MODS_JSON_LEN {
+            return Err(BackendError::InvalidRequest(format!(
+                "mods JSON exceeds the {MAX_MODS_JSON_LEN}-byte limit"
+            )));
+        }
+        let bytes = unsafe { slice::from_raw_parts(raw.mods_json, raw.mods_json_len) };
+        let json = str::from_utf8(bytes).map_err(|error| {
+            BackendError::InvalidRequest(format!("mods JSON is not UTF-8: {error}"))
+        })?;
+        if json.trim().is_empty() {
+            return Err(BackendError::InvalidRequest(
+                "mods JSON must not be blank".into(),
+            ));
+        }
+        ModInput::Json(json.to_owned())
+    } else {
+        if !raw.mods_json.is_null() || raw.mods_json_len != 0 {
+            return Err(BackendError::InvalidRequest(
+                "mods JSON pointer and length require ROSU_OPT_MODS_JSON".into(),
+            ));
+        }
+        let bits = u32::try_from(raw.mods).map_err(|_| {
+            BackendError::UnsupportedOption("mods bits above bit 31 are reserved".into())
+        })?;
+        ModInput::Legacy(bits)
+    };
     Ok(DifficultyRequest {
         mode: Mode::from_i32(raw.mode)?,
         mods,
@@ -1086,6 +1123,37 @@ mod tests {
     }
 
     #[test]
+    fn structured_mods_are_copied_and_validated() {
+        let json = br#"[{"acronym":"DT","settings":{"speed_change":1.2}}]"#;
+        let raw = RosuDifficultyRequest {
+            struct_size: size_of::<RosuDifficultyRequest>() as u32,
+            abi_version: ABI_VERSION,
+            mode: 0,
+            score_mode: 0,
+            mods: 0,
+            option_flags: option::MODS_JSON,
+            clock_rate: 0.0,
+            ar: 0.0,
+            od: 0.0,
+            cs: 0.0,
+            hp: 0.0,
+            passed_objects: 0,
+            reserved: 0,
+            mods_json: json.as_ptr(),
+            mods_json_len: json.len(),
+        };
+
+        let parsed = parse_difficulty(&raw).unwrap();
+        assert!(matches!(parsed.mods, ModInput::Json(value) if value.as_bytes() == json));
+
+        let conflicting = RosuDifficultyRequest { mods: 8, ..raw };
+        assert!(matches!(
+            parse_difficulty(&conflicting),
+            Err(BackendError::InvalidRequest(_))
+        ));
+    }
+
+    #[test]
     fn null_and_forged_handles_return_errors() {
         let request = RosuDifficultyRequest {
             struct_size: size_of::<RosuDifficultyRequest>() as u32,
@@ -1101,6 +1169,8 @@ mod tests {
             hp: 0.0,
             passed_objects: 0,
             reserved: 0,
+            mods_json: ptr::null(),
+            mods_json_len: 0,
         };
         let mut result = RosuDifficultyResult::default();
         assert_eq!(

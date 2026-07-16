@@ -8,4 +8,6 @@ rust-version.workspace = true
 [dependencies]
 backend-api.workspace = true
 rosu_pp_202510 = { package = "rosu-pp", version = "=4.0.1" }
-
+rosu-mods.workspace = true
+serde.workspace = true
+serde_json.workspace = true

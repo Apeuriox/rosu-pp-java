@@ -16,3 +16,6 @@ rust-version = "1.97"
 backend-api = { path = "crates/backend-api", version = "0.1.0" }
 backend-202510 = { path = "crates/backend-202510", version = "0.1.0" }
 backend-202607 = { path = "crates/backend-202607", version = "0.1.0" }
+rosu-mods = { version = "=0.4.1", features = ["serde"] }
+serde = "=1.0.219"
+serde_json = "=1.0.140"

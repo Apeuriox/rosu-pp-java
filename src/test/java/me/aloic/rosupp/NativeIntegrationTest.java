@@ -25,6 +25,60 @@ class NativeIntegrationTest {
         assertEquals("rework-20260706-9a073d2", byVersion.get(AlgorithmVersion.REWORK_20260706).version());
         assertFalse(byVersion.get(AlgorithmVersion.REWORK_202510).capabilities().readingSkill());
         assertTrue(byVersion.get(AlgorithmVersion.REWORK_20260706).capabilities().readingSkill());
+        assertTrue(byVersion.get(AlgorithmVersion.REWORK_202510).capabilities().structuredMods());
+        assertTrue(byVersion.get(AlgorithmVersion.REWORK_20260706).capabilities().structuredMods());
+    }
+
+    @Test
+    void structuredModsAreParsedByBothBackendsAndPreservedForGradualCalculation() throws IOException {
+        String customDt = """
+                [{"acronym":"DT","settings":{"speed_change":1.2}}]
+                """;
+        var jsonRequest = DifficultyRequest.builder()
+                .mode(GameMode.OSU)
+                .modsJson(customDt)
+                .build();
+        var legacyDtRequest = DifficultyRequest.builder()
+                .mode(GameMode.OSU)
+                .mods(Mods.DOUBLE_TIME)
+                .build();
+
+        for (var version : AlgorithmVersion.values()) {
+            try (var pp = RosuPp.forVersion(version); var map = pp.loadBeatmap(goldenMap())) {
+                var custom = pp.calculateDifficulty(map, jsonRequest);
+                var legacy = pp.calculateDifficulty(map, legacyDtRequest);
+                assertNotEquals(legacy.stars(), custom.stars(), version.toString());
+
+                try (var gradual = pp.gradualDifficulty(map, jsonRequest)) {
+                    assertEquals(custom.stars(), gradual.finish().stars(), 1e-12, version.toString());
+                }
+
+                var performance = pp.calculatePerformance(
+                        map,
+                        PerformanceRequest.builder(jsonRequest).accuracy(98.5).misses(1).build());
+                assertEquals(version, performance.algorithmId());
+            }
+        }
+    }
+
+    @Test
+    void malformedAndUnsupportedStructuredModsReturnExplicitErrors() throws IOException {
+        try (var pp = RosuPp.forVersion(AlgorithmVersion.REWORK_202510);
+             var map = pp.loadBeatmap(goldenMap())) {
+            var malformed = DifficultyRequest.builder().modsJson("[{]").build();
+            assertThrows(RosuPpException.class, () -> pp.calculateDifficulty(map, malformed));
+
+            var unknownSetting = DifficultyRequest.builder()
+                    .modsJson("[{\"acronym\":\"DT\",\"settings\":{\"not_a_setting\":1}}]")
+                    .build();
+            assertThrows(RosuPpException.class, () -> pp.calculateDifficulty(map, unknownSetting));
+
+            var unknownMod = DifficultyRequest.builder()
+                    .modsJson("[{\"acronym\":\"ZZ\"}]")
+                    .build();
+            assertThrows(UnsupportedOptionException.class,
+                    () -> pp.calculateDifficulty(map, unknownMod));
+        }
     }
 
     @Test
@@ -73,11 +127,25 @@ class NativeIntegrationTest {
                     var golden = expected.get(version).get(mode);
                     assertEquals(golden.stars(), difficulty.stars(), 1e-9, version + " " + mode);
                     assertEquals(golden.pp(), performance.pp(), 1e-9, version + " " + mode);
-                    System.out.println(performance);
+//                    System.out.println(performance);
                 }
                 assertEquals(version.stableKey(), version == AlgorithmVersion.REWORK_202510
                         ? "rework-202510" : "rework-20260706-9a073d2");
             }
+        }
+    }
+    @Test
+    void outputFullResult() throws IOException {
+        try (var pp = RosuPp.forVersion(AlgorithmVersion.REWORK_20260706); var map = pp.loadBeatmap(goldenMap())) {
+            var performance = pp.calculatePerformance(map, PerformanceRequest.builder(DifficultyRequest.builder().mode(GameMode.OSU)
+                            .modsJson("""
+                                    [\
+                                        {
+                                          "acronym": "HR"
+                                        }
+                                      ]""").build())
+                    .accuracy(100.0).combo(4295).build());
+            System.out.println(performance);
         }
     }
 

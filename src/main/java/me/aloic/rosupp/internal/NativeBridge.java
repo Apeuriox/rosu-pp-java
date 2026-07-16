@@ -12,13 +12,14 @@ import java.util.List;
 import static java.lang.foreign.ValueLayout.*;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 1;
+    public static final int ABI_VERSION = 2;
 
     private static final MemoryLayout ALGORITHM_INFO = MemoryLayout.structLayout(
             JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS);
     private static final MemoryLayout DIFFICULTY_REQUEST = MemoryLayout.structLayout(
             JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_LONG, JAVA_LONG,
-            JAVA_DOUBLE, JAVA_DOUBLE, JAVA_DOUBLE, JAVA_DOUBLE, JAVA_DOUBLE, JAVA_INT, JAVA_INT);
+            JAVA_DOUBLE, JAVA_DOUBLE, JAVA_DOUBLE, JAVA_DOUBLE, JAVA_DOUBLE, JAVA_INT, JAVA_INT,
+            ADDRESS, JAVA_LONG);
     private static final MemoryLayout PERFORMANCE_REQUEST = MemoryLayout.structLayout(
             DIFFICULTY_REQUEST, JAVA_LONG, JAVA_DOUBLE,
             JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT,
@@ -68,7 +69,7 @@ public final class NativeBridge {
     private NativeBridge() {
         int actual = invokeInt(abiVersion);
         if (actual != ABI_VERSION) throw new RosuPpException(-4, "Native ABI mismatch: Java=" + ABI_VERSION + ", native=" + actual);
-        if (DIFFICULTY_REQUEST.byteSize() != 80 || PERFORMANCE_REQUEST.byteSize() != 144
+        if (DIFFICULTY_REQUEST.byteSize() != 96 || PERFORMANCE_REQUEST.byteSize() != 160
                 || SCORE_STATE.byteSize() != 64 || DIFFICULTY_RESULT.byteSize() != 328
                 || PERFORMANCE_RESULT.byteSize() != 488) {
             throw new ExceptionInInitializerError("Unexpected Java platform C layout sizes");
@@ -204,6 +205,17 @@ public final class NativeBridge {
         out.set(JAVA_DOUBLE, 56, request.csRaw());
         out.set(JAVA_DOUBLE, 64, request.hpRaw());
         out.set(JAVA_INT, 72, request.passedObjectsRaw());
+        String modsJson = request.modsJsonRaw();
+        if (modsJson == null) {
+            out.set(ADDRESS, 80, MemorySegment.NULL);
+            out.set(JAVA_LONG, 88, 0);
+        } else {
+            byte[] utf8 = modsJson.getBytes(StandardCharsets.UTF_8);
+            MemorySegment data = arena.allocate(utf8.length);
+            data.copyFrom(MemorySegment.ofArray(utf8));
+            out.set(ADDRESS, 80, data);
+            out.set(JAVA_LONG, 88, utf8.length);
+        }
         return out;
     }
 
@@ -215,12 +227,12 @@ public final class NativeBridge {
     private MemorySegment writePerformance(Arena arena, PerformanceRequest request) {
         MemorySegment out = arena.allocate(PERFORMANCE_REQUEST);
         out.asSlice(0, DIFFICULTY_REQUEST.byteSize()).copyFrom(writeDifficulty(arena, request.difficulty()));
-        out.set(JAVA_LONG, 80, request.scoreFields());
-        out.set(JAVA_DOUBLE, 88, request.accuracyRaw());
+        out.set(JAVA_LONG, 96, request.scoreFields());
+        out.set(JAVA_DOUBLE, 104, request.accuracyRaw());
         int[] values = {request.comboRaw(), request.missesRaw(), request.n300Raw(), request.n100Raw(), request.n50Raw(),
                 request.nGekiRaw(), request.nKatuRaw(), request.largeTickHitsRaw(), request.smallTickHitsRaw(),
                 request.sliderEndHitsRaw(), request.legacyTotalScoreRaw(), 0};
-        for (int i = 0; i < values.length; i++) out.set(JAVA_INT, 96L + i * 4L, values[i]);
+        for (int i = 0; i < values.length; i++) out.set(JAVA_INT, 112L + i * 4L, values[i]);
         return out;
     }
 

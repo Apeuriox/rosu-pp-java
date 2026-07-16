@@ -2,7 +2,7 @@
 
 use backend_api::{
     Algorithm, Backend, BackendError, Beatmap as BackendBeatmap, DifficultyRequest,
-    DifficultyResult, Mode, PerformanceRequest, PerformanceResult, ScoreMode, ScoreState,
+    DifficultyResult, ModInput, Mode, PerformanceRequest, PerformanceResult, ScoreMode, ScoreState,
     capability, option, present, score_field,
 };
 use rosu::{
@@ -10,7 +10,9 @@ use rosu::{
     any::{DifficultyAttributes, PerformanceAttributes, ScoreState as RosuScoreState},
     model::mode::GameMode,
 };
+use rosu_mods::{GameMod, GameMode as ModsGameMode, serde::GameModsSeed};
 use rosu_pp_202607 as rosu;
+use serde::de::{DeserializeSeed, IntoDeserializer};
 
 pub static ALGORITHM: Algorithm = Algorithm {
     id: backend_api::ALGORITHM_202607,
@@ -46,15 +48,15 @@ impl BackendBeatmap for Map202607 {
     }
 
     fn difficulty(&self, request: &DifficultyRequest) -> Result<DifficultyResult, BackendError> {
-        let (map, mode) = prepare_map(&self.map, request)?;
-        let attrs = build_difficulty(request).calculate(&map);
+        let (map, mode, mods) = prepare_map(&self.map, request)?;
+        let attrs = build_difficulty(request, &mods).calculate(&map);
         Ok(convert_difficulty(attrs, mode))
     }
 
     fn performance(&self, request: &PerformanceRequest) -> Result<PerformanceResult, BackendError> {
-        let (map, mode) = prepare_map(&self.map, &request.difficulty)?;
+        let (map, mode, mods) = prepare_map(&self.map, &request.difficulty)?;
         validate_performance(request, mode)?;
-        let attrs = build_performance(&map, request).calculate();
+        let attrs = build_performance(&map, request, &mods).calculate();
         Ok(convert_performance(attrs, mode))
     }
 
@@ -63,8 +65,8 @@ impl BackendBeatmap for Map202607 {
         request: &DifficultyRequest,
         object_index: usize,
     ) -> Result<DifficultyResult, BackendError> {
-        let (map, mode) = prepare_map(&self.map, request)?;
-        let attrs = build_difficulty(request)
+        let (map, mode, mods) = prepare_map(&self.map, request)?;
+        let attrs = build_difficulty(request, &mods)
             .gradual_difficulty(&map)
             .nth(object_index)
             .ok_or(BackendError::EndOfStream)?;
@@ -77,8 +79,8 @@ impl BackendBeatmap for Map202607 {
         object_index: usize,
         state: &ScoreState,
     ) -> Result<PerformanceResult, BackendError> {
-        let (map, mode) = prepare_map(&self.map, request)?;
-        let mut gradual = build_difficulty(request).gradual_performance(&map);
+        let (map, mode, mods) = prepare_map(&self.map, request)?;
+        let mut gradual = build_difficulty(request, &mods).gradual_performance(&map);
         let attrs = gradual
             .nth(convert_score_state(state), object_index)
             .ok_or(BackendError::EndOfStream)?;
@@ -89,8 +91,8 @@ impl BackendBeatmap for Map202607 {
         &self,
         request: &DifficultyRequest,
     ) -> Result<DifficultyResult, BackendError> {
-        let (map, mode) = prepare_map(&self.map, request)?;
-        let attrs = build_difficulty(request)
+        let (map, mode, mods) = prepare_map(&self.map, request)?;
+        let attrs = build_difficulty(request, &mods)
             .gradual_difficulty(&map)
             .last()
             .ok_or(BackendError::EndOfStream)?;
@@ -102,8 +104,8 @@ impl BackendBeatmap for Map202607 {
         request: &DifficultyRequest,
         state: &ScoreState,
     ) -> Result<PerformanceResult, BackendError> {
-        let (map, mode) = prepare_map(&self.map, request)?;
-        let mut gradual = build_difficulty(request).gradual_performance(&map);
+        let (map, mode, mods) = prepare_map(&self.map, request)?;
+        let mut gradual = build_difficulty(request, &mods).gradual_performance(&map);
         let attrs = gradual
             .last(convert_score_state(state))
             .ok_or(BackendError::EndOfStream)?;
@@ -132,15 +134,89 @@ fn from_rosu_mode(mode: GameMode) -> Mode {
 fn prepare_map(
     source: &Beatmap,
     request: &DifficultyRequest,
-) -> Result<(Beatmap, Mode), BackendError> {
+) -> Result<(Beatmap, Mode, GameMods), BackendError> {
     let mode = request.mode.unwrap_or_else(|| from_rosu_mode(source.mode));
     validate_difficulty(request, mode)?;
-    let mods = GameMods::from(request.mods);
+    let mods = parse_mods(&request.mods, mode)?;
     let map = source
         .clone()
         .convert(to_rosu_mode(mode), &mods)
         .map_err(|e| BackendError::UnsupportedOption(format!("mode conversion failed: {e}")))?;
-    Ok((map, mode))
+    Ok((map, mode, mods))
+}
+
+fn parse_mods(input: &ModInput, mode: Mode) -> Result<GameMods, BackendError> {
+    let ModInput::Json(json) = input else {
+        let ModInput::Legacy(bits) = input else {
+            unreachable!()
+        };
+        return Ok(GameMods::from(*bits));
+    };
+
+    let mods_mode = match mode {
+        Mode::Osu => ModsGameMode::Osu,
+        Mode::Taiko => ModsGameMode::Taiko,
+        Mode::Catch => ModsGameMode::Catch,
+        Mode::Mania => ModsGameMode::Mania,
+    };
+    let mut value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|error| BackendError::InvalidRequest(format!("invalid mods JSON: {error}")))?;
+    normalize_official_api_settings(&mut value)?;
+    let structured = GameModsSeed::Mode {
+        mode: mods_mode,
+        deny_unknown_fields: true,
+    }
+    .deserialize(value.into_deserializer())
+    .map_err(|error| BackendError::InvalidRequest(format!("invalid mods JSON: {error}")))?;
+
+    if let Some(gamemod) = structured.iter().find(|gamemod| {
+        matches!(
+            gamemod,
+            GameMod::UnknownOsu(_)
+                | GameMod::UnknownTaiko(_)
+                | GameMod::UnknownCatch(_)
+                | GameMod::UnknownMania(_)
+        )
+    }) {
+        return Err(BackendError::UnsupportedOption(format!(
+            "unsupported mod acronym {} for {mods_mode}",
+            gamemod.acronym()
+        )));
+    }
+
+    Ok(structured.into())
+}
+
+fn normalize_official_api_settings(value: &mut serde_json::Value) -> Result<(), BackendError> {
+    let Some(mods) = value.as_array_mut() else {
+        return Ok(());
+    };
+
+    for gamemod in mods {
+        let Some(object) = gamemod.as_object_mut() else {
+            continue;
+        };
+        if object.get("acronym").and_then(serde_json::Value::as_str) != Some("MR") {
+            continue;
+        }
+        let Some(reflection) = object
+            .get_mut("settings")
+            .and_then(serde_json::Value::as_object_mut)
+            .and_then(|settings| settings.get_mut("reflection"))
+        else {
+            continue;
+        };
+        if let Some(number) = reflection.as_u64() {
+            if number > 2 {
+                return Err(BackendError::InvalidRequest(
+                    "MR reflection must be 0, 1, or 2".into(),
+                ));
+            }
+            *reflection = serde_json::Value::String(number.to_string());
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_difficulty(request: &DifficultyRequest, mode: Mode) -> Result<(), BackendError> {
@@ -216,8 +292,8 @@ fn validate_performance(request: &PerformanceRequest, mode: Mode) -> Result<(), 
     Ok(())
 }
 
-fn build_difficulty(request: &DifficultyRequest) -> Difficulty {
-    let mut difficulty = Difficulty::new().mods(request.mods);
+fn build_difficulty(request: &DifficultyRequest, mods: &GameMods) -> Difficulty {
+    let mut difficulty = Difficulty::new().mods(mods.clone());
     let flags = request.option_flags;
     if flags & option::CLOCK_RATE != 0 {
         difficulty = difficulty.clock_rate(request.clock_rate);
@@ -243,8 +319,13 @@ fn build_difficulty(request: &DifficultyRequest) -> Difficulty {
     difficulty
 }
 
-fn build_performance<'a>(map: &'a Beatmap, request: &PerformanceRequest) -> Performance<'a> {
-    let mut performance = Performance::new(map).difficulty(build_difficulty(&request.difficulty));
+fn build_performance<'a>(
+    map: &'a Beatmap,
+    request: &PerformanceRequest,
+    mods: &GameMods,
+) -> Performance<'a> {
+    let mut performance =
+        Performance::new(map).difficulty(build_difficulty(&request.difficulty, mods));
     let fields = request.score_fields;
     if fields & score_field::ACCURACY != 0 {
         performance = performance.accuracy(request.accuracy);

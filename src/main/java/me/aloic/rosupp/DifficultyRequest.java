@@ -12,16 +12,19 @@ public final class DifficultyRequest {
     static final long HP = 1L << 4;
     static final long PASSED_OBJECTS = 1L << 5;
     static final long SCORE_MODE = 1L << 6;
+    static final long MODS_JSON = 1L << 7;
 
     private final GameMode mode;
     private final Mods mods;
+    private final String modsJson;
     private final long optionFlags;
     private final ScoreMode scoreMode;
     private final double clockRate, ar, od, cs, hp;
     private final int passedObjects;
 
     private DifficultyRequest(Builder b) {
-        mode = b.mode; mods = b.mods; optionFlags = b.flags; scoreMode = b.scoreMode;
+        mode = b.mode; mods = b.mods; modsJson = b.modsJson;
+        optionFlags = b.flags; scoreMode = b.scoreMode;
         clockRate = b.clockRate; ar = b.ar; od = b.od; cs = b.cs; hp = b.hp;
         passedObjects = b.passedObjects;
     }
@@ -30,6 +33,7 @@ public final class DifficultyRequest {
     public static DifficultyRequest defaults() { return builder().build(); }
     public Optional<GameMode> mode() { return Optional.ofNullable(mode); }
     public Mods mods() { return mods; }
+    public Optional<String> modsJson() { return Optional.ofNullable(modsJson); }
     public Optional<ScoreMode> scoreMode() { return has(SCORE_MODE) ? Optional.of(scoreMode) : Optional.empty(); }
     public OptionalDouble clockRate() { return optional(CLOCK_RATE, clockRate); }
     public OptionalDouble ar() { return optional(AR, ar); }
@@ -46,18 +50,38 @@ public final class DifficultyRequest {
     public double hpRaw() { return hp; }
     public int passedObjectsRaw() { return passedObjects; }
     public ScoreMode scoreModeRaw() { return scoreMode; }
+    public String modsJsonRaw() { return modsJson; }
     private OptionalDouble optional(long flag, double value) { return has(flag) ? OptionalDouble.of(value) : OptionalDouble.empty(); }
 
     public static final class Builder {
         private GameMode mode;
         private Mods mods = Mods.NONE;
+        private String modsJson;
+        private boolean legacyModsExplicit;
         private long flags;
         private ScoreMode scoreMode = ScoreMode.DEFAULT;
         private double clockRate, ar, od, cs, hp;
         private int passedObjects;
 
         public Builder mode(GameMode value) { mode = value; return this; }
-        public Builder mods(Mods value) { mods = java.util.Objects.requireNonNull(value); return this; }
+        public Builder mods(Mods value) {
+            if (modsJson != null) {
+                throw new IllegalStateException("legacy mods and mods JSON are mutually exclusive");
+            }
+            mods = java.util.Objects.requireNonNull(value);
+            legacyModsExplicit = true;
+            return this;
+        }
+        public Builder modsJson(String value) {
+            java.util.Objects.requireNonNull(value);
+            if (value.isBlank()) throw new IllegalArgumentException("modsJson must not be blank");
+            if (legacyModsExplicit) {
+                throw new IllegalStateException("legacy mods and mods JSON are mutually exclusive");
+            }
+            modsJson = value;
+            flags |= MODS_JSON;
+            return this;
+        }
         public Builder clockRate(double value) { clockRate = value; flags |= CLOCK_RATE; return this; }
         public Builder ar(double value) { ar = value; flags |= AR; return this; }
         public Builder od(double value) { od = value; flags |= OD; return this; }

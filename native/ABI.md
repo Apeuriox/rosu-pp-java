@@ -1,46 +1,54 @@
 # Native Bridge C ABI
 
-公共声明位于 `include/rosu_pp_ffi.h`，当前 `rosu_abi_version()` 返回 `1`。所有结构都使用 Rust `#[repr(C)]` 和 C 固定宽度整数；Java 21 侧在初始化时校验关键结构尺寸。
+The public declarations are defined in `include/rosu_pp_ffi.h`. The current `rosu_abi_version()` value is `2`. All structures use Rust `#[repr(C)]` and fixed-width C integers. The Java 21 binding verifies the sizes of critical structures during initialization.
 
-## 字符串与结构扩展
+## Strings and structure extension
 
-- `RosuAlgorithmInfo` 和每份结果中的名称/版本指针都是只读、UTF-8、NUL 结尾的静态字符串，在动态库保持加载期间有效；调用方不得释放或修改。
-- 路径输入是 `(uint8_t *, size_t)` UTF-8 字节，不要求 NUL 结尾。内存谱面输入在调用期间借用，函数返回前完成解析，调用方仍拥有原始字节。
-- 请求、score state 和输出缓冲区都必须预先设置 `struct_size` 与 `abi_version`。当前版本在写入前拒绝尺寸过小或 ABI 不匹配的缓冲区，避免新 bridge 覆盖旧调用方的较小结构；成功后 bridge 会再次写回自身尺寸/版本。
-- 新 ABI 会优先在结构尾部追加字段，并用 capability / present bits 表示语义可用性。
+- The name and version pointers in `RosuAlgorithmInfo` and result structures refer to read-only, UTF-8, NUL-terminated static strings. They remain valid while the dynamic library is loaded and must not be modified or freed by the caller.
+- Path inputs are provided as `(uint8_t *, size_t)` UTF-8 byte sequences and do not require a NUL terminator. In-memory beatmap bytes are borrowed for the duration of the call. Parsing finishes before the function returns, and ownership of the original bytes remains with the caller.
+- Requests, score states, and output buffers must initialize both `struct_size` and `abi_version`. The bridge rejects undersized structures and ABI mismatches before writing to them, preventing a newer bridge from overwriting a smaller buffer supplied by an older caller. On success, the bridge writes its own structure size and ABI version back to output structures.
+- Future ABI versions should append fields to the end of existing structures whenever possible. Capability and presence bits indicate whether the associated semantics or result fields are available.
 
-## Handle 所有权
+## Handle ownership
 
-`RosuCalculator *`、`RosuBeatmap *` 和 `RosuGradual *` 是不可解引用的 opaque token。它们不是暴露的 Rust 地址：bridge 使用单调 token 和加锁注册表保存真实对象。
+`RosuCalculator *`, `RosuBeatmap *`, and `RosuGradual *` are opaque, non-dereferenceable tokens. They are not exposed Rust addresses. The bridge stores the actual objects in synchronized registries and identifies them through monotonically increasing tokens.
 
-- create/load 成功返回调用方独占 handle；失败返回 NULL，并设置线程局部错误。
-- 对应的 `*_free` 可以接受 NULL、未知 token 或已释放 token，并且是幂等的。
-- calculator 与 beatmap 都绑定算法 ID。计算时若二者版本不同，返回 `ROSU_INVALID_HANDLE`。
-- gradual handle 同时绑定算法、谱面和请求；生命周期中没有修改 algorithm ID 的入口。
-- `rosu_gradual_*_last` 直接调用对应 rosu-pp gradual calculator 的 `last`，高效处理所有剩余对象；成功后该 handle 到达流末尾。
-- free 后继续调用返回 `ROSU_INVALID_HANDLE`，不会解引用悬空 Rust 指针。
-- 注册表由互斥锁保护。单个 gradual handle 的位置只在成功计算后前进。
+- A successful create or load operation returns a handle owned by the caller. Failure returns `NULL` and stores a thread-local error.
+- The corresponding `*_free` functions accept `NULL`, unknown tokens, and previously released tokens. Releasing a handle is idempotent.
+- Calculator and beatmap handles are both bound to an algorithm ID. Attempting to calculate with handles from different algorithm versions returns `ROSU_INVALID_HANDLE`.
+- A gradual handle is bound to its algorithm, beatmap, and request. Its algorithm ID cannot be changed during its lifetime.
+- `rosu_gradual_*_last` delegates to the corresponding rosu-pp gradual calculator's `last` operation to process all remaining objects efficiently. After success, the handle is at the end of the stream.
+- Using a handle after it has been released returns `ROSU_INVALID_HANDLE`; the bridge never dereferences a stale Rust pointer.
+- Registries are protected by mutexes. A gradual handle advances only after a successful calculation.
 
-本实现选择“每个谱面 handle 绑定算法版本”，而不是让一个 handle 延迟保存原始字节。原因是所有权更明确：解析错误在 load 时发生，后端 Rust 类型永远只存在于其 adapter 内，且不会在一次渐进计算中临时切换解析实现。Java 如果要比较版本，应把相同路径或字节分别交给两个 calculator。
+Each beatmap handle is bound to one algorithm version. The bridge does not keep raw beatmap bytes in a shared handle for delayed parsing. This gives clearer ownership: parsing errors occur during load, backend-specific Rust types remain inside their adapters, and a gradual calculation cannot switch parsing implementations midway through its lifetime. To compare algorithm versions from Java, load the same path or byte sequence separately through each calculator.
 
-## 错误
+## Errors
 
-状态码包括参数错误、未知算法、无效 handle、ABI 不匹配、解析错误、不支持选项、计算错误、渐进结束和 panic。错误文本是线程局部的：
+Status codes cover invalid arguments, unknown algorithms, invalid handles, ABI mismatches, parsing errors, unsupported options, calculation errors, the end of a gradual stream, and native panics. Error text is thread-local:
 
-1. 调用 `rosu_last_error_length()` 获取所需 UTF-8 字节数；
-2. 分配缓冲区；
-3. 调用 `rosu_last_error_copy()`；返回值始终是完整所需长度，复制量是 `min(capacity, length)`。
+1. Call `rosu_last_error_length()` to obtain the required UTF-8 byte count.
+2. Allocate a buffer.
+3. Call `rosu_last_error_copy()`. Its return value is always the complete required length; the number of bytes copied is `min(capacity, length)`.
 
-除 `free` 和只返回标量的查询外，所有导出入口都使用 `catch_unwind(AssertUnwindSafe(...))`。panic 被转换为 `ROSU_PANIC` 或 NULL，并留下 `native panic was caught at the C ABI boundary`，不会跨越 C ABI。
+Except for release functions and scalar-only queries, exported entry points use `catch_unwind(AssertUnwindSafe(...))`. A Rust panic becomes `ROSU_PANIC` or `NULL` and stores `native panic was caught at the C ABI boundary`. A panic never crosses the C ABI boundary.
 
-不支持的显式输入不会静默忽略。例如 Taiko 上的 AR/CS、Taiko 的 n50、非 osu!standard 的 slider tick/end 字段、非 Mania 的 n_geki 都返回 `ROSU_UNSUPPORTED_OPTION`。
+Explicit unsupported input is never silently ignored. Examples include AR or CS overrides for Taiko, `n50` for Taiko, slider tick or end fields outside osu!standard, and `n_geki` outside Mania. These cases return `ROSU_UNSUPPORTED_OPTION`.
 
 ## Mods
 
-`RosuDifficultyRequest.mods` 是 bridge 自己定义的稳定 bitset，当前低 32 位与公开 osu! legacy mod bits 对应。adapter 再把该数值转换为每套 rosu-pp 的 `GameMods`；Rust enum 的判别值没有进入 ABI。高 32 位保留用于未来可扩展表示，当前非零时返回不支持。
+`RosuDifficultyRequest.mods` is a bridge-defined stable bitset. Its lower 32 bits currently correspond to the public osu! legacy mod bits. The upper 32 bits are reserved and currently produce an unsupported-option error when nonzero.
 
-## 结果
+Structured lazer mods are supplied through the trailing `(mods_json, mods_json_len)` fields with `ROSU_OPT_MODS_JSON` set. The JSON is borrowed UTF-8 data and does not require a NUL terminator. For a nonzero length, the pointer must address at least `mods_json_len` readable bytes for the entire call. The bridge copies the JSON into owned storage before returning, so a gradual handle never retains the caller's pointer. JSON input is limited to 1 MiB.
 
-每份难度和表现结果都携带：algorithm ID、静态名称、详细版本字符串、capability bits、mode 和 present bits。结果结构是两个版本/四个模式属性的超集。调用方必须先检查 present bit；未标记字段的存储值为 0 只是初始化细节，不代表计算结果为 0。
+Structured JSON and the legacy bitset are mutually exclusive. A null pointer, empty JSON, invalid UTF-8, unknown setting fields, or a mod unsupported by the backend's pinned rosu-mods version produces an explicit error.
 
-202607 的公开 reading 属性会设置 `READING` / `READING_DIFFICULT_NOTE_COUNT` / `PP_READING`。202510 不设置这些位。HarmonicSkill 没有底层公开输出字段，因此不跨 ABI 暴露。
+The FFI layer does not parse JSON into the Rust types of either algorithm version. After determining the beatmap's effective mode, each backend adapter uses its own rosu-mods dependency and a strict mode-specific deserialization seed to construct its corresponding `GameMods`. No Rust enum discriminant crosses a backend boundary or the C ABI.
+
+## Results
+
+Every difficulty and performance result contains the algorithm ID, static algorithm name, detailed version string, capability bits, game mode, and presence bits. Result structures form a superset of the attributes exposed by both algorithm versions across all four game modes.
+
+Callers must check the appropriate presence bit before reading an optional field. A stored value of zero without its presence bit is only an initialization detail and does not represent a calculated zero.
+
+The 202607 backend sets `READING`, `READING_DIFFICULT_NOTE_COUNT`, and `PP_READING` when it exposes the corresponding reading attributes. The 202510 backend does not set these bits. HarmonicSkill has no public output field in the underlying library and is therefore not exposed through the ABI.

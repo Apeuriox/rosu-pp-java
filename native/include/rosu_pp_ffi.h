@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define ROSU_ABI_VERSION 1u
+#define ROSU_ABI_VERSION 2u
 
 typedef struct RosuCalculator RosuCalculator;
 typedef struct RosuBeatmap RosuBeatmap;
@@ -33,7 +33,8 @@ enum RosuCapability {
     ROSU_CAP_GRADUAL_DIFFICULTY = UINT64_C(1) << 2,
     ROSU_CAP_GRADUAL_PERFORMANCE = UINT64_C(1) << 3,
     ROSU_CAP_READING_SKILL = UINT64_C(1) << 4,
-    ROSU_CAP_LAZER_SLIDER_ACCURACY = UINT64_C(1) << 5
+    ROSU_CAP_LAZER_SLIDER_ACCURACY = UINT64_C(1) << 5,
+    ROSU_CAP_STRUCTURED_MODS = UINT64_C(1) << 6
 };
 
 enum RosuOptionFlag {
@@ -43,7 +44,8 @@ enum RosuOptionFlag {
     ROSU_OPT_CS = UINT64_C(1) << 3,
     ROSU_OPT_HP = UINT64_C(1) << 4,
     ROSU_OPT_PASSED_OBJECTS = UINT64_C(1) << 5,
-    ROSU_OPT_SCORE_MODE = UINT64_C(1) << 6
+    ROSU_OPT_SCORE_MODE = UINT64_C(1) << 6,
+    ROSU_OPT_MODS_JSON = UINT64_C(1) << 7
 };
 
 enum RosuScoreField {
@@ -86,6 +88,8 @@ typedef struct RosuDifficultyRequest {
     double hp;
     uint32_t passed_objects;
     uint32_t reserved;
+    const uint8_t *mods_json; /* borrowed UTF-8 JSON; valid for the duration of the call */
+    size_t mods_json_len;     /* excludes any NUL terminator */
 } RosuDifficultyRequest;
 
 typedef struct RosuPerformanceRequest {

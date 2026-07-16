@@ -12,8 +12,13 @@ pub mod capability {
     pub const GRADUAL_PERFORMANCE: u64 = 1 << 3;
     pub const READING_SKILL: u64 = 1 << 4;
     pub const LAZER_SLIDER_ACCURACY: u64 = 1 << 5;
-    pub const ALL_BASE: u64 =
-        DIFFICULTY | PERFORMANCE | GRADUAL_DIFFICULTY | GRADUAL_PERFORMANCE | LAZER_SLIDER_ACCURACY;
+    pub const STRUCTURED_MODS: u64 = 1 << 6;
+    pub const ALL_BASE: u64 = DIFFICULTY
+        | PERFORMANCE
+        | GRADUAL_DIFFICULTY
+        | GRADUAL_PERFORMANCE
+        | LAZER_SLIDER_ACCURACY
+        | STRUCTURED_MODS;
 }
 
 pub mod option {
@@ -24,6 +29,7 @@ pub mod option {
     pub const HP: u64 = 1 << 4;
     pub const PASSED_OBJECTS: u64 = 1 << 5;
     pub const SCORE_MODE: u64 = 1 << 6;
+    pub const MODS_JSON: u64 = 1 << 7;
 }
 
 pub mod score_field {
@@ -116,9 +122,15 @@ pub struct Algorithm {
 }
 
 #[derive(Clone, Debug)]
+pub enum ModInput {
+    Legacy(u32),
+    Json(String),
+}
+
+#[derive(Clone, Debug)]
 pub struct DifficultyRequest {
     pub mode: Option<Mode>,
-    pub mods: u32,
+    pub mods: ModInput,
     pub option_flags: u64,
     pub score_mode: ScoreMode,
     pub clock_rate: f64,
