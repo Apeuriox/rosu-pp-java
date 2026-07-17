@@ -1,0 +1,13 @@
+[package]
+name = "backend-202502"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+backend-api.workspace = true
+rosu_pp_202502 = { package = "rosu-pp", version = "=3.1.0" }
+rosu_mods_202502 = { package = "rosu-mods", version = "=0.3.1", features = ["serde"] }
+serde.workspace = true
+serde_json.workspace = true

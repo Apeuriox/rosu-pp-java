@@ -13,12 +13,15 @@ use std::{
     },
 };
 
+use backend_202411::Backend202411;
+use backend_202502::Backend202502;
 use backend_202510::Backend202510;
 use backend_202607::Backend202607;
 use backend_api::{
     Algorithm, Backend, BackendError, Beatmap, DifficultyRequest, ModInput, Mode,
     PerformanceRequest, ScoreMode, ScoreState, option, score_field,
 };
+use backend_precsr_202210::BackendPrecsr202210;
 
 pub const ABI_VERSION: u32 = 2;
 const MAX_MODS_JSON_LEN: usize = 1024 * 1024;
@@ -229,6 +232,15 @@ thread_local! {
     static LAST_ERROR: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
+const NAME_PRECSR_202210: &[u8] = b"PRECSR_202210\0";
+const VERSION_PRECSR_202210: &[u8] = b"precsr-202210-rosu-pp-1.0.0\0";
+const DETAILS_PRECSR_202210: &[u8] = b"Unmodified crates.io rosu-pp 1.0.0\0";
+const NAME_202411: &[u8] = b"REWORK_202411\0";
+const VERSION_202411: &[u8] = b"rework-202411-rosu-pp-2.0.0\0";
+const DETAILS_202411: &[u8] = b"Unmodified crates.io rosu-pp 2.0.0\0";
+const NAME_202502: &[u8] = b"REWORK_202502\0";
+const VERSION_202502: &[u8] = b"rework-202502-rosu-pp-3.1.0\0";
+const DETAILS_202502: &[u8] = b"Unmodified crates.io rosu-pp 3.1.0\0";
 const NAME_202510: &[u8] = b"REWORK_202510\0";
 const VERSION_202510: &[u8] = b"rework-202510-rosu-pp-4.0.1\0";
 const DETAILS_202510: &[u8] =
@@ -269,16 +281,25 @@ fn clear_error() {
 
 fn algorithm(index: u32) -> Option<&'static Algorithm> {
     match index {
-        0 => Some(&backend_202510::ALGORITHM),
-        1 => Some(&backend_202607::ALGORITHM),
+        0 => Some(&backend_precsr_202210::ALGORITHM),
+        1 => Some(&backend_202411::ALGORITHM),
+        2 => Some(&backend_202502::ALGORITHM),
+        3 => Some(&backend_202510::ALGORITHM),
+        4 => Some(&backend_202607::ALGORITHM),
         _ => None,
     }
 }
 
 fn backend(id: u32) -> Option<&'static dyn Backend> {
+    static PRECSR: BackendPrecsr202210 = BackendPrecsr202210;
+    static REWORK_202411: Backend202411 = Backend202411;
+    static REWORK_202502: Backend202502 = Backend202502;
     static OLD: Backend202510 = Backend202510;
     static NEW: Backend202607 = Backend202607;
     match id {
+        backend_api::ALGORITHM_PRECSR_202210 => Some(&PRECSR),
+        backend_api::ALGORITHM_202411 => Some(&REWORK_202411),
+        backend_api::ALGORITHM_202502 => Some(&REWORK_202502),
         backend_api::ALGORITHM_202510 => Some(&OLD),
         backend_api::ALGORITHM_202607 => Some(&NEW),
         _ => None,
@@ -287,6 +308,21 @@ fn backend(id: u32) -> Option<&'static dyn Backend> {
 
 fn algorithm_strings(id: u32) -> (*const c_char, *const c_char, *const c_char) {
     match id {
+        backend_api::ALGORITHM_PRECSR_202210 => (
+            NAME_PRECSR_202210.as_ptr().cast(),
+            VERSION_PRECSR_202210.as_ptr().cast(),
+            DETAILS_PRECSR_202210.as_ptr().cast(),
+        ),
+        backend_api::ALGORITHM_202411 => (
+            NAME_202411.as_ptr().cast(),
+            VERSION_202411.as_ptr().cast(),
+            DETAILS_202411.as_ptr().cast(),
+        ),
+        backend_api::ALGORITHM_202502 => (
+            NAME_202502.as_ptr().cast(),
+            VERSION_202502.as_ptr().cast(),
+            DETAILS_202502.as_ptr().cast(),
+        ),
         backend_api::ALGORITHM_202510 => (
             NAME_202510.as_ptr().cast(),
             VERSION_202510.as_ptr().cast(),
@@ -622,7 +658,7 @@ pub extern "C" fn rosu_abi_version() -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rosu_algorithm_count() -> u32 {
-    2
+    5
 }
 
 #[unsafe(no_mangle)]
@@ -1089,8 +1125,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn discovers_both_algorithms() {
-        assert_eq!(rosu_algorithm_count(), 2);
+    fn discovers_all_algorithms() {
+        assert_eq!(rosu_algorithm_count(), 5);
         let mut info = RosuAlgorithmInfo {
             struct_size: size_of::<RosuAlgorithmInfo>() as u32,
             abi_version: ABI_VERSION,
@@ -1102,8 +1138,14 @@ mod tests {
             details: ptr::null(),
         };
         assert_eq!(rosu_algorithm_info(0, &mut info), status::OK);
-        assert_eq!(info.algorithm_id, backend_api::ALGORITHM_202510);
+        assert_eq!(info.algorithm_id, backend_api::ALGORITHM_PRECSR_202210);
         assert_eq!(rosu_algorithm_info(1, &mut info), status::OK);
+        assert_eq!(info.algorithm_id, backend_api::ALGORITHM_202411);
+        assert_eq!(rosu_algorithm_info(2, &mut info), status::OK);
+        assert_eq!(info.algorithm_id, backend_api::ALGORITHM_202502);
+        assert_eq!(rosu_algorithm_info(3, &mut info), status::OK);
+        assert_eq!(info.algorithm_id, backend_api::ALGORITHM_202510);
+        assert_eq!(rosu_algorithm_info(4, &mut info), status::OK);
         assert_eq!(info.algorithm_id, backend_api::ALGORITHM_202607);
     }
 

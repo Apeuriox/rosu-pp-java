@@ -2,6 +2,9 @@
 
 use std::{error::Error, fmt};
 
+pub const ALGORITHM_PRECSR_202210: u32 = 20_221_000;
+pub const ALGORITHM_202411: u32 = 20_241_100;
+pub const ALGORITHM_202502: u32 = 20_250_200;
 pub const ALGORITHM_202510: u32 = 20_251_000;
 pub const ALGORITHM_202607: u32 = 20_260_706;
 

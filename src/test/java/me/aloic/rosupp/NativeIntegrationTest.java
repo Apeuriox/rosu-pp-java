@@ -16,17 +16,25 @@ class NativeIntegrationTest {
     }
 
     @Test
-    void discoversBothPinnedAlgorithmsAndCapabilities() {
+    void discoversAllPinnedAlgorithmsAndCapabilities() {
         var algorithms = RosuPp.availableAlgorithms();
-        assertEquals(2, algorithms.size());
+        assertEquals(5, algorithms.size());
         var byVersion = new EnumMap<AlgorithmVersion, AlgorithmInfo>(AlgorithmVersion.class);
         algorithms.forEach(info -> byVersion.put(info.algorithm(), info));
+        assertEquals("precsr-202210-rosu-pp-1.0.0", byVersion.get(AlgorithmVersion.PRECSR_202210).version());
+        assertEquals("rework-202411-rosu-pp-2.0.0", byVersion.get(AlgorithmVersion.REWORK_202411).version());
+        assertEquals("rework-202502-rosu-pp-3.1.0", byVersion.get(AlgorithmVersion.REWORK_202502).version());
         assertEquals("rework-202510-rosu-pp-4.0.1", byVersion.get(AlgorithmVersion.REWORK_202510).version());
         assertEquals("rework-20260706-9a073d2", byVersion.get(AlgorithmVersion.REWORK_20260706).version());
-        assertFalse(byVersion.get(AlgorithmVersion.REWORK_202510).capabilities().readingSkill());
+        for (var version : AlgorithmVersion.values()) {
+            assertEquals(version != AlgorithmVersion.PRECSR_202210,
+                    byVersion.get(version).capabilities().structuredMods(), version.toString());
+            assertEquals(version != AlgorithmVersion.PRECSR_202210,
+                    byVersion.get(version).capabilities().lazerSliderAccuracy(), version.toString());
+            assertEquals(version == AlgorithmVersion.REWORK_20260706,
+                    byVersion.get(version).capabilities().readingSkill(), version.toString());
+        }
         assertTrue(byVersion.get(AlgorithmVersion.REWORK_20260706).capabilities().readingSkill());
-        assertTrue(byVersion.get(AlgorithmVersion.REWORK_202510).capabilities().structuredMods());
-        assertTrue(byVersion.get(AlgorithmVersion.REWORK_20260706).capabilities().structuredMods());
     }
 
     @Test
@@ -44,6 +52,7 @@ class NativeIntegrationTest {
                 .build();
 
         for (var version : AlgorithmVersion.values()) {
+            if (version == AlgorithmVersion.PRECSR_202210) continue;
             try (var pp = RosuPp.forVersion(version); var map = pp.loadBeatmap(goldenMap())) {
                 var custom = pp.calculateDifficulty(map, jsonRequest);
                 var legacy = pp.calculateDifficulty(map, legacyDtRequest);
@@ -59,44 +68,65 @@ class NativeIntegrationTest {
                 assertEquals(version, performance.algorithmId());
             }
         }
-    }
 
-    @Test
-    void malformedAndUnsupportedStructuredModsReturnExplicitErrors() throws IOException {
-        try (var pp = RosuPp.forVersion(AlgorithmVersion.REWORK_202510);
+        try (var pp = RosuPp.forVersion(AlgorithmVersion.PRECSR_202210);
              var map = pp.loadBeatmap(goldenMap())) {
-            var malformed = DifficultyRequest.builder().modsJson("[{]").build();
-            assertThrows(RosuPpException.class, () -> pp.calculateDifficulty(map, malformed));
-
-            var unknownSetting = DifficultyRequest.builder()
-                    .modsJson("[{\"acronym\":\"DT\",\"settings\":{\"not_a_setting\":1}}]")
-                    .build();
-            assertThrows(RosuPpException.class, () -> pp.calculateDifficulty(map, unknownSetting));
-
-            var unknownMod = DifficultyRequest.builder()
-                    .modsJson("[{\"acronym\":\"ZZ\"}]")
-                    .build();
             assertThrows(UnsupportedOptionException.class,
-                    () -> pp.calculateDifficulty(map, unknownMod));
+                    () -> pp.calculateDifficulty(map, jsonRequest));
         }
     }
 
     @Test
-    void twoVersionsCoexistWithoutSharingState() throws IOException {
+    void malformedAndUnsupportedStructuredModsReturnExplicitErrors() throws IOException {
+        for (var version : AlgorithmVersion.values()) {
+            if (version == AlgorithmVersion.PRECSR_202210) continue;
+            try (var pp = RosuPp.forVersion(version); var map = pp.loadBeatmap(goldenMap())) {
+                var malformed = DifficultyRequest.builder().modsJson("[{]").build();
+                assertThrows(RosuPpException.class, () -> pp.calculateDifficulty(map, malformed),
+                        version.toString());
+
+                var unknownSetting = DifficultyRequest.builder()
+                        .modsJson("[{\"acronym\":\"DT\",\"settings\":{\"not_a_setting\":1}}]")
+                        .build();
+                assertThrows(RosuPpException.class, () -> pp.calculateDifficulty(map, unknownSetting),
+                        version.toString());
+
+                var unknownMod = DifficultyRequest.builder()
+                        .modsJson("[{\"acronym\":\"ZZ\"}]")
+                        .build();
+                assertThrows(UnsupportedOptionException.class,
+                        () -> pp.calculateDifficulty(map, unknownMod), version.toString());
+            }
+        }
+    }
+
+    @Test
+    void allVersionsCoexistWithoutSharingState() throws IOException {
         byte[] bytes = goldenMap();
-        try (var old = RosuPp.forVersion(AlgorithmVersion.REWORK_202510);
-             var rework = RosuPp.forVersion(AlgorithmVersion.REWORK_20260706);
-             var oldMap = old.loadBeatmap(bytes);
-             var reworkMap = rework.loadBeatmap(bytes)) {
-            var oldResult = old.calculateDifficulty(oldMap, DifficultyRequest.defaults());
-            var newResult = rework.calculateDifficulty(reworkMap, DifficultyRequest.defaults());
-            assertEquals(AlgorithmVersion.REWORK_202510, oldResult.algorithmId());
-            assertEquals(AlgorithmVersion.REWORK_20260706, newResult.algorithmId());
-            assertFalse(oldResult.hasReading());
-            assertTrue(newResult.hasReading());
-            assertNotEquals(oldResult.stars(), newResult.stars());
+        try (var precsr = RosuPp.forVersion(AlgorithmVersion.PRECSR_202210);
+             var rework202411 = RosuPp.forVersion(AlgorithmVersion.REWORK_202411);
+             var rework202502 = RosuPp.forVersion(AlgorithmVersion.REWORK_202502);
+             var rework202510 = RosuPp.forVersion(AlgorithmVersion.REWORK_202510);
+             var rework202607 = RosuPp.forVersion(AlgorithmVersion.REWORK_20260706);
+             var precsrMap = precsr.loadBeatmap(bytes);
+             var map202411 = rework202411.loadBeatmap(bytes);
+             var map202502 = rework202502.loadBeatmap(bytes);
+             var map202510 = rework202510.loadBeatmap(bytes);
+             var map202607 = rework202607.loadBeatmap(bytes)) {
+            var request = DifficultyRequest.defaults();
+            assertEquals(AlgorithmVersion.PRECSR_202210,
+                    precsr.calculateDifficulty(precsrMap, request).algorithmId());
+            assertEquals(AlgorithmVersion.REWORK_202411,
+                    rework202411.calculateDifficulty(map202411, request).algorithmId());
+            assertEquals(AlgorithmVersion.REWORK_202502,
+                    rework202502.calculateDifficulty(map202502, request).algorithmId());
+            assertEquals(AlgorithmVersion.REWORK_202510,
+                    rework202510.calculateDifficulty(map202510, request).algorithmId());
+            var newest = rework202607.calculateDifficulty(map202607, request);
+            assertEquals(AlgorithmVersion.REWORK_20260706, newest.algorithmId());
+            assertTrue(newest.hasReading());
             assertThrows(IllegalArgumentException.class,
-                    () -> old.calculateDifficulty(reworkMap, DifficultyRequest.defaults()));
+                    () -> precsr.calculateDifficulty(map202607, request));
         }
     }
 
@@ -104,6 +134,27 @@ class NativeIntegrationTest {
     void goldenResultsRemainIndependent() throws IOException {
         record Golden(double stars, double pp) {}
         var expected = new EnumMap<AlgorithmVersion, EnumMap<GameMode, Golden>>(AlgorithmVersion.class);
+        var precsr = new EnumMap<GameMode, Golden>(GameMode.class);
+        precsr.put(GameMode.OSU, new Golden(6.493222707809602, 493.18592285663505));
+        precsr.put(GameMode.TAIKO, new Golden(5.169815713559883, 368.0874703919316));
+        precsr.put(GameMode.CATCH, new Golden(5.005506181464555, 372.3640194903018));
+        precsr.put(GameMode.MANIA, new Golden(3.00065368915447, 88.17804888616732));
+        expected.put(AlgorithmVersion.PRECSR_202210, precsr);
+
+        var rework202411 = new EnumMap<GameMode, Golden>(GameMode.class);
+        rework202411.put(GameMode.OSU, new Golden(6.4881491246971965, 493.23068934772715));
+        rework202411.put(GameMode.TAIKO, new Golden(5.161815738471442, 384.4559012161384));
+        rework202411.put(GameMode.CATCH, new Golden(5.002235413321431, 371.8771666789953));
+        rework202411.put(GameMode.MANIA, new Golden(3.0006536891485234, 88.17804888576262));
+        expected.put(AlgorithmVersion.REWORK_202411, rework202411);
+
+        var rework202502 = new EnumMap<GameMode, Golden>(GameMode.class);
+        rework202502.put(GameMode.OSU, new Golden(6.476760463610541, 491.5649464451657));
+        rework202502.put(GameMode.TAIKO, new Golden(4.343191524346165, 304.3730735846037));
+        rework202502.put(GameMode.CATCH, new Golden(5.002235413321431, 371.8771666789953));
+        rework202502.put(GameMode.MANIA, new Golden(3.0006536891485234, 88.17804888576262));
+        expected.put(AlgorithmVersion.REWORK_202502, rework202502);
+
         var old = new EnumMap<GameMode, Golden>(GameMode.class);
         old.put(GameMode.OSU, new Golden(6.476089622889547, 501.5658126493332));
         old.put(GameMode.TAIKO, new Golden(4.282593854949352, 391.27544664357595));
@@ -129,8 +180,13 @@ class NativeIntegrationTest {
                     assertEquals(golden.pp(), performance.pp(), 1e-9, version + " " + mode);
 //                    System.out.println(performance);
                 }
-                assertEquals(version.stableKey(), version == AlgorithmVersion.REWORK_202510
-                        ? "rework-202510" : "rework-20260706-9a073d2");
+                assertEquals(switch (version) {
+                    case PRECSR_202210 -> "precsr-202210-rosu-pp-1.0.0";
+                    case REWORK_202411 -> "rework-202411-rosu-pp-2.0.0";
+                    case REWORK_202502 -> "rework-202502-rosu-pp-3.1.0";
+                    case REWORK_202510 -> "rework-202510";
+                    case REWORK_20260706 -> "rework-20260706-9a073d2";
+                }, version.stableKey());
             }
         }
     }
@@ -155,7 +211,9 @@ class NativeIntegrationTest {
             try (var pp = RosuPp.forVersion(version); var map = pp.loadBeatmap(goldenMap())) {
                 for (var mode : GameMode.values()) {
                     var builder = DifficultyRequest.builder().mode(mode);
-                    if (mode == GameMode.OSU) builder.scoreMode(ScoreMode.STABLE);
+                    if (mode == GameMode.OSU && version != AlgorithmVersion.PRECSR_202210) {
+                        builder.scoreMode(ScoreMode.STABLE);
+                    }
                     var request = builder.build();
                     var fullDifficulty = pp.calculateDifficulty(map, request);
                     DifficultyResult gradualDifficulty;
@@ -261,5 +319,31 @@ class NativeIntegrationTest {
         pp.close();
         pp.close();
         assertThrows(IllegalStateException.class, () -> pp.loadBeatmap(goldenMap()));
+    }
+
+    @Test
+    void historicalBackendsRejectInputsTheyCannotRepresent() throws IOException {
+        try (var pp = RosuPp.forVersion(AlgorithmVersion.PRECSR_202210);
+             var map = pp.loadBeatmap(goldenMap())) {
+            var scoreMode = DifficultyRequest.builder().scoreMode(ScoreMode.LAZER).build();
+            assertThrows(UnsupportedOptionException.class,
+                    () -> pp.calculateDifficulty(map, scoreMode));
+
+            try (var gradual = pp.gradualPerformance(map, DifficultyRequest.defaults())) {
+                var lazerState = new ScoreState(1, 1, 0, 0, 0, 0, 1, 0, 0, 0, null);
+                assertThrows(UnsupportedOptionException.class, () -> gradual.next(lazerState));
+            }
+        }
+
+        for (var version : new AlgorithmVersion[]{
+                AlgorithmVersion.REWORK_202411, AlgorithmVersion.REWORK_202502}) {
+            try (var pp = RosuPp.forVersion(version);
+                 var map = pp.loadBeatmap(goldenMap());
+                 var gradual = pp.gradualPerformance(map, DifficultyRequest.defaults())) {
+                var legacyScoreState = new ScoreState(1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1_000_000);
+                assertThrows(UnsupportedOptionException.class,
+                        () -> gradual.next(legacyScoreState), version.toString());
+            }
+        }
     }
 }

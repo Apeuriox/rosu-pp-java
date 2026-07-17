@@ -1,6 +1,9 @@
 [workspace]
 members = [
     "crates/backend-api",
+    "crates/backend-precsr-202210",
+    "crates/backend-202411",
+    "crates/backend-202502",
     "crates/backend-202510",
     "crates/backend-202607",
     "crates/ffi",
@@ -14,6 +17,9 @@ rust-version = "1.97"
 
 [workspace.dependencies]
 backend-api = { path = "crates/backend-api", version = "0.1.0" }
+backend-precsr-202210 = { path = "crates/backend-precsr-202210", version = "0.1.0" }
+backend-202411 = { path = "crates/backend-202411", version = "0.1.0" }
+backend-202502 = { path = "crates/backend-202502", version = "0.1.0" }
 backend-202510 = { path = "crates/backend-202510", version = "0.1.0" }
 backend-202607 = { path = "crates/backend-202607", version = "0.1.0" }
 rosu-mods = { version = "=0.4.1", features = ["serde"] }

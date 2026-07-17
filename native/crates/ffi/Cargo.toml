@@ -11,6 +11,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 backend-api.workspace = true
+backend-precsr-202210.workspace = true
+backend-202411.workspace = true
+backend-202502.workspace = true
 backend-202510.workspace = true
 backend-202607.workspace = true
-

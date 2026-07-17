@@ -2,12 +2,21 @@
 
 `rosu-pp-java` is a Java 21 library that uses the preview Foreign Function & Memory API to call Rust `rosu-pp` implementations through a single native bridge. Multiple pinned algorithm versions can be loaded in the same process and selected at runtime.
 
-Two algorithm versions are currently supported:
+Five algorithm versions are currently supported:
 
 | Java enum | Stable version key | Rust source |
 | --- | --- | --- |
+| `PRECSR_202210` | `precsr-202210-rosu-pp-1.0.0` | crates.io `rosu-pp = "=1.0.0"` |
+| `REWORK_202411` | `rework-202411-rosu-pp-2.0.0` | crates.io `rosu-pp = "=2.0.0"` |
+| `REWORK_202502` | `rework-202502-rosu-pp-3.1.0` | crates.io `rosu-pp = "=3.1.0"` |
 | `REWORK_202510` | `rework-202510` | crates.io `rosu-pp = "=4.0.1"` |
 | `REWORK_20260706` | `rework-20260706-9a073d2` | `Apeuriox/rosu-pp` commit `9a073d29611ef936b581a08d3c5b288ef5427301` |
+
+All crates.io dependencies use exact `=` requirements and are additionally protected by the
+checksums committed in `native/Cargo.lock`. `PRECSR_202210` predates structured lazer mods and
+lazer slider-accuracy inputs; those options return `UnsupportedOptionException` instead of being
+ignored. The other four versions support structured mods through the rosu-mods release matched to
+their own rosu-pp dependency.
 
 The algorithm version is part of every result and must also be included in application cache keys. Do not treat values produced by different algorithm versions as having identical semantics.
 
