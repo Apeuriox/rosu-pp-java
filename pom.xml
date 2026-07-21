@@ -9,13 +9,13 @@
     <version>0.0.1</version>
 
     <name>rosu-pp-java</name>
-    <description>Java 21 FFM bindings for multiple pinned rosu-pp algorithms</description>
+    <description>Java FFM bindings for multiple pinned rosu-pp algorithms</description>
 
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>22</maven.compiler.release>
+        <rosu.enablePreview>false</rosu.enablePreview>
+        <rosu.previewJvmArgs></rosu.previewJvmArgs>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.release>21</maven.compiler.release>
         <junit.version>5.11.4</junit.version>
     </properties>
 
@@ -48,8 +48,8 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.13.0</version>
                 <configuration>
-                    <release>21</release>
-                    <enablePreview>true</enablePreview>
+                    <release>${maven.compiler.release}</release>
+                    <enablePreview>${rosu.enablePreview}</enablePreview>
                 </configuration>
             </plugin>
             <plugin>
@@ -57,7 +57,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.2</version>
                 <configuration>
-                    <argLine>--enable-preview --enable-native-access=ALL-UNNAMED</argLine>
+                    <argLine>${rosu.previewJvmArgs} --enable-native-access=ALL-UNNAMED</argLine>
                     <useModulePath>false</useModulePath>
                 </configuration>
             </plugin>
@@ -75,5 +75,27 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>java21-preview</id>
+            <properties>
+                <maven.compiler.release>21</maven.compiler.release>
+                <rosu.enablePreview>true</rosu.enablePreview>
+                <rosu.previewJvmArgs>--enable-preview</rosu.previewJvmArgs>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <classifier>java21-preview</classifier>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

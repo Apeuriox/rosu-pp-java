@@ -13,6 +13,7 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class NativeBridge {
     public static final int ABI_VERSION = 2;
+    private static final int MAX_C_STRING_BYTES = 4096;
 
     private static final MemoryLayout ALGORITHM_INFO = MemoryLayout.structLayout(
             JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS);
@@ -281,7 +282,14 @@ public final class NativeBridge {
     }
 
     private String cString(MemorySegment address) {
-        return address.equals(MemorySegment.NULL) ? "" : address.reinterpret(4096).getUtf8String(0);
+        if (address.equals(MemorySegment.NULL)) return "";
+        MemorySegment bytes = address.reinterpret(MAX_C_STRING_BYTES);
+        int length = 0;
+        while (length < MAX_C_STRING_BYTES && bytes.get(JAVA_BYTE, length) != 0) length++;
+        if (length == MAX_C_STRING_BYTES) {
+            throw new RosuPpException(-4, "Native UTF-8 string exceeds " + MAX_C_STRING_BYTES + " bytes");
+        }
+        return new String(bytes.asSlice(0, length).toArray(JAVA_BYTE), StandardCharsets.UTF_8);
     }
 
     private void check(int status) { if (status != 0) throw lastException(status); }

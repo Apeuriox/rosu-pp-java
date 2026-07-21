@@ -1,6 +1,13 @@
 # rosu-pp-java
 
-`rosu-pp-java` is a Java 21 library that uses the preview Foreign Function & Memory API to call Rust `rosu-pp` implementations through a single native bridge. Multiple pinned algorithm versions can be loaded in the same process and selected at runtime.
+`rosu-pp-java` uses the Foreign Function & Memory API to call Rust `rosu-pp` implementations through a single native bridge. Multiple pinned algorithm versions can be loaded in the same process and selected at runtime. The same public Java API is published in two bytecode variants:
+
+| JAR | Runtime | FFM status |
+| --- | --- | --- |
+| `rosu-pp-java-0.0.1.jar` | Java 22 and newer, including Java 26 | Final API, no preview bytecode |
+| `rosu-pp-java-0.0.1-java21-preview.jar` | Java 21 only | Java 21 preview API |
+
+Put exactly one of these JARs on an application's classpath. Java preview class files are tied to their exact JDK release, so the Java 21 variant cannot run on Java 22 or newer even when `--enable-preview` is supplied.
 
 Five algorithm versions are currently supported:
 
@@ -22,19 +29,32 @@ The algorithm version is part of every result and must also be included in appli
 
 ## Requirements
 
-- Java 21
+- Java 21 for the `java21-preview` JAR, or Java 22+ for the stable JAR
+- Both JDK 21 and JDK 22+ when building both variants locally
 - Rust 1.97 or newer when building the native bridge locally
 - Windows x86_64 or Linux x86_64
 - Docker Desktop in Linux-container mode when building both native platforms from Windows
 
-Java 21 still exposes FFM as a preview API, so compilation and execution require:
+Java 21 compilation and execution require:
 
 ```text
 --enable-preview
 --enable-native-access=ALL-UNNAMED
 ```
 
-The Maven configuration already supplies these flags for compilation and tests.
+Java 22+ uses the final FFM API and must not use `--enable-preview`; it still needs native access:
+
+```text
+--enable-native-access=ALL-UNNAMED
+```
+
+The Maven profiles supply the correct flags for their own compilation and tests.
+
+When importing this repository into IntelliJ IDEA, use JDK 22+ and the default Maven profile for
+the stable build. To work on the Java 21 variant instead, switch the Project SDK to JDK 21, enable
+the `java21-preview` Maven profile, and use Java 21 Preview as the language level. Applications
+that consume the library only need to select the JAR matching their runtime; they must not include
+both variants.
 
 ## Native library loading
 
@@ -63,7 +83,7 @@ META-INF/native/linux-x86_64/librosu_pp_ffi.so
 
 When no external library is found, the loader extracts the library for the current platform to a private temporary directory and keeps it loaded for the lifetime of the JVM. Explicit external paths remain useful for development and overriding the bundled library.
 
-For example:
+For example, Java 21 preview applications use:
 
 ```powershell
 java --enable-preview --enable-native-access=ALL-UNNAMED `
@@ -75,6 +95,17 @@ java --enable-preview --enable-native-access=ALL-UNNAMED `
 java --enable-preview --enable-native-access=ALL-UNNAMED \
   -Drosu.pp.native.path=/path/to/librosu_pp_ffi.so \
   -jar your-application.jar
+```
+
+Java 22+ applications use the stable JAR without the preview flag:
+
+```powershell
+java --enable-native-access=ALL-UNNAMED `
+  -jar your-application.jar
+```
+
+```bash
+java --enable-native-access=ALL-UNNAMED -jar your-application.jar
 ```
 
 ## Java usage
@@ -173,47 +204,62 @@ cargo test --workspace
 cargo build --release -p rosu-pp-ffi
 ```
 
-Build and test Java:
+Build and test the Java 22+ stable variant with a JDK 22 or newer:
 
 ```powershell
+$env:JAVA_HOME = 'C:\path\to\jdk-22-or-newer'
 .\mvnw.cmd -B test
 .\mvnw.cmd -B package -DskipTests
 ```
 
-On Linux, use `./mvnw` instead of `mvnw.cmd`. Ensure that `JAVA_HOME` points to JDK 21 because Maven Wrapper gives `JAVA_HOME` precedence over the `java` executable found on `PATH`.
-
-The platform-local release native library is written to `native/target/release/`. A normal Maven build produces the Java classes but only includes native libraries that were staged in `target/native-resources` before the Maven resource phase.
-
-### Building a universal JAR locally on Windows
-
-The included PowerShell script builds the Windows DLL locally, builds the Linux SO inside the fixed `rust:1.97.0-bookworm` Docker image, stages both libraries, runs the Java tests, and verifies the JAR entries:
+Build and test the Java 21 preview variant with JDK 21:
 
 ```powershell
 $env:JAVA_HOME = 'C:\path\to\jdk-21'
+.\mvnw.cmd -B test -Pjava21-preview
+.\mvnw.cmd -B package -Pjava21-preview -DskipTests
+```
+
+On Linux, use `./mvnw` instead of `mvnw.cmd`. Maven Wrapper gives `JAVA_HOME` precedence over the `java` executable found on `PATH`.
+
+The platform-local release native library is written to `native/target/release/`. A normal Maven build produces the Java classes but only includes native libraries that were staged in `target/native-resources` before the Maven resource phase.
+
+### Building both universal JARs locally on Windows
+
+The PowerShell script builds the Windows DLL locally, builds the Linux SO inside the fixed `rust:1.97.0-bookworm` Docker image, stages both libraries, runs both Java test variants, and verifies their native resources and class-file versions. It requires an exact JDK 21 and a JDK 22 or newer:
+
+```powershell
+$env:JAVA21_HOME = 'C:\path\to\jdk-21'
+$env:JAVA22_HOME = 'C:\path\to\jdk-22-or-newer'
 .\scripts\build-universal.ps1
 ```
+
+The homes can alternatively be passed as `-Java21Home` and `-Java22Home` parameters.
 
 The Docker Linux build uses Debian Bookworm and therefore targets glibc 2.36, which is below the project's GLIBC 2.38 ceiling. If a compatible Linux SO has already been built, Docker can be skipped:
 
 ```powershell
 .\scripts\build-universal.ps1 `
+  -Java21Home 'C:\path\to\jdk-21' `
+  -Java22Home 'C:\path\to\jdk-22-or-newer' `
   -LinuxLibrary 'C:\path\to\librosu_pp_ffi.so'
 ```
 
-The resulting universal artifact is:
+The resulting universal artifacts are:
 
 ```text
-target/rosu-pp-java-0.0.1.jar
+target/rosu-pp-java-0.0.1.jar                 # Java 22+
+target/rosu-pp-java-0.0.1-java21-preview.jar  # Java 21 only
 ```
 
 A Linux host cannot normally produce the MSVC Windows DLL with the standard Rust toolchain. Build it on Windows or download the `rosu-pp-native-windows-x86_64` artifact from GitHub Actions, then stage it together with the locally built Linux SO using the same resource paths shown above.
 
 ## GitHub Actions artifacts
 
-The workflow builds and tests both native platforms independently and then creates the universal JAR in a dependent aggregation job. Successful workflow runs expose these artifacts in the run's **Artifacts** section:
+The workflow builds and tests both native platforms, tests the preview build on Java 21, tests the stable build on Java 22 and Java 26, and then creates both universal JARs in a dependent aggregation job. Successful workflow runs expose these artifacts in the run's **Artifacts** section:
 
 - `rosu-pp-native-linux-x86_64`
 - `rosu-pp-native-windows-x86_64`
 - `rosu-pp-java-universal`
 
-`rosu-pp-java-universal` contains `rosu-pp-java-0.0.1.jar`, the public C header, and standalone copies of both native libraries. The JAR itself also contains both native libraries and normally requires no `rosu.pp.native.path` override.
+`rosu-pp-java-universal` contains both Java JAR variants, the public C header, and standalone copies of both native libraries. Each JAR itself also contains both native libraries and normally requires no `rosu.pp.native.path` override.

@@ -14,7 +14,7 @@ env:
 
 jobs:
   linux-x86_64:
-    name: Linux x86_64 / Java 21
+    name: Linux x86_64 / Java 21 and 22+
     runs-on: ubuntu-22.04
     steps:
       - name: Check out source
@@ -52,7 +52,17 @@ jobs:
       - name: Java preview compilation and tests
         run: |
           chmod +x mvnw
-          ./mvnw -B --no-transfer-progress package
+          ./mvnw -B --no-transfer-progress package -Pjava21-preview
+
+      - name: Set up Java 22
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '22'
+          cache: maven
+
+      - name: Java stable FFM compilation and tests
+        run: ./mvnw -B --no-transfer-progress clean package
 
       - name: Stage Linux native artifact
         run: |
@@ -67,7 +77,7 @@ jobs:
           if-no-files-found: error
 
   windows-x86_64:
-    name: Windows x86_64 / Java 21
+    name: Windows x86_64 / Java 21 and 22+
     runs-on: windows-2022
     steps:
       - name: Check out source
@@ -90,7 +100,18 @@ jobs:
 
       - name: Java preview compilation and tests
         shell: pwsh
-        run: .\mvnw.cmd -B --no-transfer-progress package
+        run: .\mvnw.cmd -B --no-transfer-progress package -Pjava21-preview
+
+      - name: Set up Java 22
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '22'
+          cache: maven
+
+      - name: Java stable FFM compilation and tests
+        shell: pwsh
+        run: .\mvnw.cmd -B --no-transfer-progress clean package
 
       - name: Stage Windows native artifact
         shell: pwsh
@@ -106,19 +127,12 @@ jobs:
           if-no-files-found: error
 
   universal-jar:
-    name: Universal JAR / Windows and Linux natives
+    name: Java 21 preview and Java 22+ universal JARs
     needs: [linux-x86_64, windows-x86_64]
     runs-on: ubuntu-22.04
     steps:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Set up Java 21
-        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
 
       - name: Download Linux native artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -132,7 +146,14 @@ jobs:
           name: rosu-pp-native-windows-x86_64
           path: native-input/windows
 
-      - name: Stage native classpath resources
+      - name: Set up Java 21
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build and test Java 21 preview universal JAR
         shell: bash
         run: |
           set -euo pipefail
@@ -144,24 +165,77 @@ jobs:
             target/native-resources/META-INF/native/linux-x86_64/
           cp native-input/windows/rosu_pp_ffi.dll \
             target/native-resources/META-INF/native/windows-x86_64/
+          ./mvnw -B --no-transfer-progress package -Pjava21-preview
+          mkdir -p java-output
+          cp target/rosu-pp-java-0.0.1-java21-preview.jar java-output/
 
-      - name: Build and test universal JAR
-        run: ./mvnw -B --no-transfer-progress package
+      - name: Set up Java 22
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '22'
+          cache: maven
 
-      - name: Verify universal JAR contents
+      - name: Build and test Java 22+ stable universal JAR
         shell: bash
         run: |
           set -euo pipefail
-          jar_file=target/rosu-pp-java-0.0.1.jar
-          jar tf "$jar_file" | grep -Fx 'META-INF/native/linux-x86_64/librosu_pp_ffi.so'
-          jar tf "$jar_file" | grep -Fx 'META-INF/native/windows-x86_64/rosu_pp_ffi.dll'
+          ./mvnw -B --no-transfer-progress clean
+          mkdir -p target/native-resources/META-INF/native/linux-x86_64
+          mkdir -p target/native-resources/META-INF/native/windows-x86_64
+          cp native-input/linux/librosu_pp_ffi.so \
+            target/native-resources/META-INF/native/linux-x86_64/
+          cp native-input/windows/rosu_pp_ffi.dll \
+            target/native-resources/META-INF/native/windows-x86_64/
+          ./mvnw -B --no-transfer-progress package
+          cp target/rosu-pp-java-0.0.1.jar java-output/
+
+      - name: Set up Java 26
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '26'
+          cache: maven
+
+      - name: Verify stable FFM build on Java 26
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./mvnw -B --no-transfer-progress clean
+          mkdir -p target/native-resources/META-INF/native/linux-x86_64
+          mkdir -p target/native-resources/META-INF/native/windows-x86_64
+          cp native-input/linux/librosu_pp_ffi.so \
+            target/native-resources/META-INF/native/linux-x86_64/
+          cp native-input/windows/rosu_pp_ffi.dll \
+            target/native-resources/META-INF/native/windows-x86_64/
+          ./mvnw -B --no-transfer-progress test
+
+      - name: Verify universal JAR contents and class versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          preview=java-output/rosu-pp-java-0.0.1-java21-preview.jar
+          stable=java-output/rosu-pp-java-0.0.1.jar
+          for jar_file in "$preview" "$stable"; do
+            jar tf "$jar_file" | grep -Fx 'META-INF/native/linux-x86_64/librosu_pp_ffi.so'
+            jar tf "$jar_file" | grep -Fx 'META-INF/native/windows-x86_64/rosu_pp_ffi.dll'
+          done
+          javap -verbose -classpath "$preview" me.aloic.rosupp.internal.NativeBridge \
+            | grep -F 'minor version: 65535'
+          javap -verbose -classpath "$preview" me.aloic.rosupp.internal.NativeBridge \
+            | grep -F 'major version: 65'
+          javap -verbose -classpath "$stable" me.aloic.rosupp.internal.NativeBridge \
+            | grep -F 'minor version: 0'
+          javap -verbose -classpath "$stable" me.aloic.rosupp.internal.NativeBridge \
+            | grep -F 'major version: 66'
 
       - name: Stage universal distribution
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p universal-output/native
-          cp target/rosu-pp-java-0.0.1.jar universal-output/
+          cp java-output/rosu-pp-java-0.0.1.jar universal-output/
+          cp java-output/rosu-pp-java-0.0.1-java21-preview.jar universal-output/
           cp native/include/rosu_pp_ffi.h universal-output/
           cp native-input/linux/librosu_pp_ffi.so universal-output/native/
           cp native-input/windows/rosu_pp_ffi.dll universal-output/native/
