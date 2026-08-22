@@ -238,10 +238,13 @@ jobs:
           ./mvnw -B --no-transfer-progress clean
           mkdir -p target/native-resources/META-INF/native/linux-x86_64
           mkdir -p target/native-resources/META-INF/native/windows-x86_64
+          mkdir -p target/native-resources/META-INF/native/macos-aarch64
           cp native-input/linux/librosu_pp_ffi.so \
             target/native-resources/META-INF/native/linux-x86_64/
           cp native-input/windows/rosu_pp_ffi.dll \
             target/native-resources/META-INF/native/windows-x86_64/
+          cp native-input/macos/librosu_pp_ffi.dylib \
+            target/native-resources/META-INF/native/macos-aarch64/
           ./mvnw -B --no-transfer-progress package
           cp target/rosu-pp-java-0.0.1.jar java-output/
 
@@ -259,11 +262,14 @@ jobs:
           ./mvnw -B --no-transfer-progress clean
           mkdir -p target/native-resources/META-INF/native/linux-x86_64
           mkdir -p target/native-resources/META-INF/native/windows-x86_64
+          mkdir -p target/native-resources/META-INF/native/macos-aarch64
           cp native-input/linux/librosu_pp_ffi.so \
             target/native-resources/META-INF/native/linux-x86_64/
           cp native-input/windows/rosu_pp_ffi.dll \
             target/native-resources/META-INF/native/windows-x86_64/
           ./mvnw -B --no-transfer-progress test
+          cp native-input/macos/librosu_pp_ffi.dylib \
+            target/native-resources/META-INF/native/macos-aarch64/
 
       - name: Verify universal JAR contents and class versions
         shell: bash
