@@ -78,6 +78,9 @@ public final class NativeLibraryLoader {
         if (os.contains("linux") && isX86_64) {
             return new Platform("linux-x86_64", "librosu_pp_ffi.so");
         }
+        if (os.contains("linux") && isAArch64) {
+            return new Platform("linux-aarch64", "librosu_pp_ffi.so");
+        }
         if ((os.contains("mac") || os.contains("darwin")) && isAArch64) {
             return new Platform("macos-aarch64", "librosu_pp_ffi.dylib");
         }

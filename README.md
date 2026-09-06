@@ -261,6 +261,7 @@ The workflow builds and tests both native platforms, tests the preview build on 
 - `rosu-pp-native-linux-x86_64`
 - `rosu-pp-native-windows-x86_64`
 - `rosu-pp-native-macos-arm64`
+- `rosu-pp-native-linux-arm64`
 - `rosu-pp-java-universal`
 
 `rosu-pp-java-universal` contains both Java JAR variants, the public C header, and standalone copies of both native libraries. Each JAR itself also contains both native libraries and normally requires no `rosu.pp.native.path` override.

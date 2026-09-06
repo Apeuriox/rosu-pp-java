@@ -121,7 +121,52 @@ jobs:
           name: rosu-pp-native-linux-x86_64
           path: native-output/librosu_pp_ffi.so
           if-no-files-found: error
+  linux-arm64:
+    name: Linux ARM64 / Java 22
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
+      - name: Install fixed Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component cargo,rustfmt
+
+      - name: Rust release build
+        run: cargo +"$RUST_TOOLCHAIN" build --manifest-path native/Cargo.toml --release --locked -p rosu-pp-ffi
+
+      - name: Set up Java 21
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Java preview compilation and tests
+        run: |
+          chmod +x mvnw
+          ./mvnw -B --no-transfer-progress package -Pjava21-preview
+
+      - name: Set up Java 22
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
+        with:
+          distribution: temurin
+          java-version: '22'
+          cache: maven
+
+      - name: Java stable FFM compilation and tests
+        run: ./mvnw -B --no-transfer-progress clean package
+
+      - name: Stage Linux ARM64 native artifact
+        run: |
+          mkdir -p native-output
+          cp native/target/release/librosu_pp_ffi.so native-output/
+
+      - name: Upload Linux ARM64 native artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rosu-pp-native-linux-aarch64
+          path: native-output/librosu_pp_ffi.so
+          if-no-files-found: error
   windows-x86_64:
     name: Windows x86_64 / Java 22
     runs-on: windows-2022
@@ -174,7 +219,7 @@ jobs:
 
   universal-jar:
     name: Java 22 universal JARs
-    needs: [macos-arm64, linux-x86_64, windows-x86_64]
+    needs: [macos-arm64, linux-x86_64, linux-arm64, windows-x86_64]
     runs-on: ubuntu-22.04
     steps:
       - name: Check out source
@@ -191,6 +236,12 @@ jobs:
         with:
           name: rosu-pp-native-linux-x86_64
           path: native-input/linux
+
+      - name: Download Linux ARM64 native artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: rosu-pp-native-linux-aarch64
+          path: native-input/linux-arm64
 
       - name: Download Windows native artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -214,8 +265,11 @@ jobs:
           mkdir -p target/native-resources/META-INF/native/linux-x86_64
           mkdir -p target/native-resources/META-INF/native/windows-x86_64
           mkdir -p target/native-resources/META-INF/native/macos-aarch64
+          mkdir -p target/native-resources/META-INF/native/linux-aarch64
           cp native-input/linux/librosu_pp_ffi.so \
             target/native-resources/META-INF/native/linux-x86_64/
+          cp native-input/linux-arm64/librosu_pp_ffi.so \
+            target/native-resources/META-INF/native/linux-aarch64/
           cp native-input/windows/rosu_pp_ffi.dll \
             target/native-resources/META-INF/native/windows-x86_64/
           cp native-input/macos/librosu_pp_ffi.dylib \
@@ -239,8 +293,11 @@ jobs:
           mkdir -p target/native-resources/META-INF/native/linux-x86_64
           mkdir -p target/native-resources/META-INF/native/windows-x86_64
           mkdir -p target/native-resources/META-INF/native/macos-aarch64
+          mkdir -p target/native-resources/META-INF/native/linux-aarch64
           cp native-input/linux/librosu_pp_ffi.so \
             target/native-resources/META-INF/native/linux-x86_64/
+          cp native-input/linux-arm64/librosu_pp_ffi.so \
+            target/native-resources/META-INF/native/linux-aarch64/
           cp native-input/windows/rosu_pp_ffi.dll \
             target/native-resources/META-INF/native/windows-x86_64/
           cp native-input/macos/librosu_pp_ffi.dylib \
@@ -263,8 +320,11 @@ jobs:
           mkdir -p target/native-resources/META-INF/native/linux-x86_64
           mkdir -p target/native-resources/META-INF/native/windows-x86_64
           mkdir -p target/native-resources/META-INF/native/macos-aarch64
+          mkdir -p target/native-resources/META-INF/native/linux-aarch64
           cp native-input/linux/librosu_pp_ffi.so \
             target/native-resources/META-INF/native/linux-x86_64/
+          cp native-input/linux-arm64/librosu_pp_ffi.so \
+            target/native-resources/META-INF/native/linux-aarch64/
           cp native-input/windows/rosu_pp_ffi.dll \
             target/native-resources/META-INF/native/windows-x86_64/
           ./mvnw -B --no-transfer-progress test
@@ -281,6 +341,7 @@ jobs:
             jar tf "$jar_file" | grep -Fx 'META-INF/native/macos-aarch64/librosu_pp_ffi.dylib'
             jar tf "$jar_file" | grep -Fx 'META-INF/native/linux-x86_64/librosu_pp_ffi.so'
             jar tf "$jar_file" | grep -Fx 'META-INF/native/windows-x86_64/rosu_pp_ffi.dll'
+            jar tf "$jar_file" | grep -Fx 'META-INF/native/linux-aarch64/librosu_pp_ffi.so'
           done
           javap -verbose -classpath "$preview" me.aloic.rosupp.internal.NativeBridge \
             | grep -F 'minor version: 65535'
@@ -302,6 +363,7 @@ jobs:
           cp native-input/macos/librosu_pp_ffi.dylib universal-output/native/
           cp native-input/linux/librosu_pp_ffi.so universal-output/native/
           cp native-input/windows/rosu_pp_ffi.dll universal-output/native/
+          cp native-input/linux-arm64/librosu_pp_ffi.so universal-output/native/librosu_pp_ffi_aarch64.so
 
       - name: Upload universal distribution
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
