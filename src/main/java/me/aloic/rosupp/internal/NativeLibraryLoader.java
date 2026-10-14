@@ -43,10 +43,12 @@ public final class NativeLibraryLoader {
                 Path directory = Files.createTempDirectory("rosu-pp-java-");
                 Path extracted = directory.resolve(file);
                 Files.copy(input, extracted, StandardCopyOption.REPLACE_EXISTING);
-                extracted.toFile().deleteOnExit();
-                directory.toFile().deleteOnExit();
+
                 try {
-                    return SymbolLookup.libraryLookup(extracted, Arena.global());
+                    SymbolLookup lookup = SymbolLookup.libraryLookup(extracted, Arena.global());
+                    extracted.toFile().deleteOnExit();
+                    directory.toFile().deleteOnExit();
+                    return lookup;
                 } catch (RuntimeException | UnsatisfiedLinkError error) {
                     throw new NativeLibraryLoadException(
                             "Failed to load bundled native bridge extracted from " + resource + " to " + extracted,
@@ -66,11 +68,23 @@ public final class NativeLibraryLoader {
     private static Platform currentPlatform() {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String architecture = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        if (!architecture.equals("amd64") && !architecture.equals("x86_64")) {
-            throw unsupportedPlatform(os, architecture);
+
+        boolean isX86_64 = architecture.equals("x86_64") || architecture.equals("amd64");
+        boolean isAArch64 = architecture.equals("aarch64") || architecture.equals("arm64");
+
+        if (os.contains("win") && isX86_64) {
+            return new Platform("windows-x86_64", "rosu_pp_ffi.dll");
         }
-        if (os.contains("win")) return new Platform("windows-x86_64", "rosu_pp_ffi.dll");
-        if (os.contains("linux")) return new Platform("linux-x86_64", "librosu_pp_ffi.so");
+        if (os.contains("linux") && isX86_64) {
+            return new Platform("linux-x86_64", "librosu_pp_ffi.so");
+        }
+        if (os.contains("linux") && isAArch64) {
+            return new Platform("linux-aarch64", "librosu_pp_ffi.so");
+        }
+        if ((os.contains("mac") || os.contains("darwin")) && isAArch64) {
+            return new Platform("macos-aarch64", "librosu_pp_ffi.dylib");
+        }
+
         throw unsupportedPlatform(os, architecture);
     }
 
